@@ -1,3 +1,6 @@
+import html
+import re
+import time
 from datetime import datetime
 
 import httpx
@@ -7,7 +10,40 @@ from sources.types import RawNotice
 LIST_URL = "https://vendor.myfloridamarketplace.com/mfmp/pub/search/bids"
 DETAIL_URL = "https://vendor.myfloridamarketplace.com/mfmp/pub/search/bids/detail"
 PAGE = "https://vendor.myfloridamarketplace.com/search/bids/detail/{}"
-UA = "VendorAccessClub/1.0 (+https://vac2008.com; public procurement summary)"
+HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Origin": "https://vendor.myfloridamarketplace.com",
+    "Referer": "https://vendor.myfloridamarketplace.com/search/bids",
+}
+# Public VIP search is a POST. Types 4 and 6 are Invitation to Bid and Request for Proposals.
+SEARCH_BODY = {
+    "page": 1,
+    "pageSize": 25,
+    "type": ["4", "6"],
+    "status": ["OPEN"],
+    "agency": [],
+    "adNumber": "",
+    "agencyAdvertisementNumber": "",
+    "title": "",
+    "publishedDate": "",
+    "openDate": "",
+    "endDate": "",
+    "commodityCodes": [],
+}
+
+
+def snippet(text: str) -> str:
+    flat = re.sub(r"\s+", " ", text or "").strip()
+    return flat[:180]
+
+
+def plain_text(value: str) -> str:
+    text = html.unescape(value or "")
+    text = re.sub(r"(?is)<script.*?>.*?</script>", " ", text)
+    text = re.sub(r"(?is)<style.*?>.*?</style>", " ", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def parse_dt(value) -> datetime | None:
@@ -43,7 +79,7 @@ def contact_of(item: dict) -> tuple[str, str, str]:
 
 
 def normalize(item: dict) -> RawNotice | None:
-    title = str(item.get("title") or "").strip()
+    title = plain_text(str(item.get("title") or ""))
     kind = str(item.get("type") or "")
     status = str(item.get("status") or "OPEN").upper()
     if not title or status not in {"OPEN", ""}:
@@ -54,20 +90,23 @@ def normalize(item: dict) -> RawNotice | None:
     if not external:
         return None
     deadline = parse_dt(item.get("closeDate") or item.get("endDate"))
-    deadline_text = str(item.get("closeDateLocal") or item.get("closeDate") or "Deadline not stated")
+    deadline_text = deadline.strftime("%b %d, %Y") if deadline else str(item.get("closeDate") or "Deadline not stated")
     name, email, phone = contact_of(item)
     url = str(item.get("url") or item.get("source_url") or PAGE.format(external))
-    description = str(item.get("descriptionText") or item.get("description") or "")
+    description = plain_text(str(item.get("descriptionText") or item.get("description") or ""))
+    agency = item.get("agency") or item.get("agencyName") or ""
+    if isinstance(agency, dict):
+        agency = agency.get("name") or ""
     return RawNotice(
         source_key="fl_vbs",
         external_id=external,
         source_url=url,
         state="FL",
-        agency=str(item.get("agency") or item.get("agencyName") or ""),
-        title=title,
-        description=description,
+        agency=str(agency),
+        title=title[:500],
+        description=description[:4000],
         deadline_at=deadline,
-        deadline_text=deadline_text,
+        deadline_text=deadline_text[:120],
         contact_name=name,
         contact_email=email,
         contact_phone=phone,
@@ -88,13 +127,20 @@ def merge_detail(notice: RawNotice, item: dict) -> RawNotice:
     return notice
 
 
-def fetch(client: httpx.Client, limit: int = 8) -> tuple[list[RawNotice], str]:
+def fetch(client: httpx.Client, limit: int = 12) -> tuple[list[RawNotice], str]:
     try:
-        response = client.get(LIST_URL, params={"status": "OPEN", "type": "4,6"}, timeout=25)
-        response.raise_for_status()
-        payload = response.json()
+        response = client.post(LIST_URL, json=SEARCH_BODY, headers=HEADERS, timeout=25)
     except Exception as exc:
         return [], f"Florida search failed: {exc}"
+    content_type = response.headers.get("content-type", "")
+    if response.status_code >= 400 or "json" not in content_type:
+        return [], f"Florida search HTTP {response.status_code}: {snippet(response.text)}"
+    try:
+        payload = response.json()
+    except Exception as exc:
+        return [], f"Florida search was not JSON ({exc}): {snippet(response.text)}"
+    if isinstance(payload, dict) and payload.get("errorMessage"):
+        return [], f"Florida search error: {snippet(str(payload.get('errorMessage')))}"
     found: list[dict] = []
     find_records(payload, found)
     notices = []
@@ -104,10 +150,14 @@ def fetch(client: httpx.Client, limit: int = 8) -> tuple[list[RawNotice], str]:
             notices.append(notice)
         if len(notices) >= limit:
             break
+    if not notices:
+        return [], f"Florida search returned no open bids this parser kept: {snippet(response.text)}"
     detailed = []
-    for notice in notices:
+    for index, notice in enumerate(notices):
+        if index:
+            time.sleep(1)
         try:
-            detail = client.get(DETAIL_URL, params={"id": notice.external_id}, timeout=25)
+            detail = client.get(DETAIL_URL, params={"id": notice.external_id}, headers=HEADERS, timeout=25)
             if detail.status_code == 200 and "json" in detail.headers.get("content-type", ""):
                 body = detail.json()
                 row = body if isinstance(body, dict) and body.get("title") else None
@@ -120,6 +170,4 @@ def fetch(client: httpx.Client, limit: int = 8) -> tuple[list[RawNotice], str]:
         except Exception:
             pass
         detailed.append(notice)
-    if not detailed and found:
-        return [], "Florida search returned rows this parser did not keep."
     return detailed, ""

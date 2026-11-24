@@ -33,7 +33,7 @@ def test_florida_nested_json():
         "type": "Invitation to Bid",
         "agency": "City of Gainesville",
         "closeDate": "2026-12-01T15:00:00Z",
-        "descriptionText": "Replace two flush valves.",
+        "descriptionText": "<p>Replace two flush valves.&nbsp;Today.</p>",
         "contactEmail": "bids@gainesville.example",
     }]}}
     found = []
@@ -43,22 +43,36 @@ def test_florida_nested_json():
     assert notice.state == "FL"
     assert notice.external_id == "42"
     assert notice.contact_email == "bids@gainesville.example"
+    assert notice.description == "Replace two flush valves. Today."
 
 
 def test_austin_html():
     html = """
-    <p>IFB 6100 CLMC1105 View Details</p>
-    <p>Due Date: 12/03/2026 at 2PM</p>
-    <p>Furnish labor and materials for a small duct bank repair.</p>
-    <p>RFQS 6100 CLMP397 View Details</p>
-    <p>Due Date: 12/01/2026 at 2PM</p>
-    <p>Staff augmentation for engineering.</p>
+    <div class="well parent">
+      <div class="td-space-left clearfix child">
+        <strong><a href="solicitation_details.cfm?sid=142008">IFB 6100 CLMC1105</a></strong>
+        <div>Due Date: <strong>12/03/2026 at  2PM</strong></div>
+        <strong>Duct bank repair</strong>
+        <br />Furnish labor and materials for a small duct bank repair.
+      </div>
+    </div>
+    <div class="well parent">
+      <div class="td-space-left clearfix child">
+        <strong><a href="solicitation_details.cfm?sid=144241">RFQS 6100 CLMP397</a></strong>
+        <div>Due Date: <strong>12/01/2026 at  2PM</strong></div>
+        <strong>Staff augmentation</strong>
+        <br />Staff augmentation for engineering.
+      </div>
+    </div>
     """
     rows = parse_listing(html)
     assert len(rows) == 2
     assert rows[0].state == "TX"
-    assert rows[0].deadline_at == datetime(2026, 12, 3)
+    assert rows[0].external_id == "IFB 6100 CLMC1105"
+    assert rows[0].title == "Duct bank repair"
+    assert rows[0].deadline_at == datetime(2026, 12, 3, 14, 0)
     assert "duct bank" in rows[0].description
+    assert "sid=142008" in rows[0].source_url
 
 
 def test_fallback_does_not_invent_budget():

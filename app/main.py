@@ -6,7 +6,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -338,7 +338,8 @@ def _listing(db: Session, state: str, category: str, q: str):
     if q.strip():
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(Opportunity.title_clean.ilike(like), Opportunity.summary_plain.ilike(like), Opportunity.city_or_agency.ilike(like)))
-    return db.scalars(stmt.order_by(Opportunity.published_at.desc()).limit(20)).all()
+    seed_last = case((Opportunity.source_key == "seed", 1), else_=0)
+    return db.scalars(stmt.order_by(seed_last.asc(), Opportunity.published_at.desc()).limit(20)).all()
 
 
 def _render(request: Request, name: str, extra: dict):

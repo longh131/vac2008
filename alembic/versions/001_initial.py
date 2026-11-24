@@ -9,7 +9,28 @@ branch_labels = None
 depends_on = None
 
 
+def _sql(value: str):
+    return sa.text("'" + value.replace("'", "''") + "'")
+
+
 def upgrade():
+    # A failed first run leaves tables behind. MySQL commits each CREATE immediately.
+    if op.get_bind().dialect.name == "mysql":
+        op.execute(sa.text("SET FOREIGN_KEY_CHECKS=0"))
+    for name in (
+        "settings",
+        "email_logs",
+        "favorites",
+        "crawl_runs",
+        "opportunities",
+        "subscriptions",
+        "login_tokens",
+        "users",
+    ):
+        op.execute(sa.text(f"DROP TABLE IF EXISTS {name}"))
+    if op.get_bind().dialect.name == "mysql":
+        op.execute(sa.text("SET FOREIGN_KEY_CHECKS=1"))
+
     op.create_table(
         "users",
         sa.Column("id", sa.Integer, primary_key=True),
@@ -31,9 +52,9 @@ def upgrade():
         "subscriptions",
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("user_id", sa.Integer, sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("provider", sa.String(40), nullable=False, server_default="lemonsqueezy"),
-        sa.Column("provider_subscription_id", sa.String(80), nullable=False, server_default=""),
-        sa.Column("status", sa.String(20), nullable=False, server_default="expired"),
+        sa.Column("provider", sa.String(40), nullable=False, server_default=_sql("lemonsqueezy")),
+        sa.Column("provider_subscription_id", sa.String(80), nullable=False, server_default=_sql("")),
+        sa.Column("status", sa.String(20), nullable=False, server_default=_sql("expired")),
         sa.Column("current_period_end", sa.DateTime),
         sa.Column("updated_at", sa.DateTime),
     )
@@ -43,26 +64,26 @@ def upgrade():
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("source_key", sa.String(40), nullable=False),
         sa.Column("external_id", sa.String(120), nullable=False),
-        sa.Column("source_url", sa.String(500), nullable=False, server_default=""),
+        sa.Column("source_url", sa.String(500), nullable=False, server_default=_sql("")),
         sa.Column("state", sa.String(8), nullable=False),
-        sa.Column("city_or_agency", sa.String(255), nullable=False, server_default=""),
-        sa.Column("category", sa.String(80), nullable=False, server_default="Other"),
-        sa.Column("title_raw", sa.String(500), nullable=False, server_default=""),
-        sa.Column("title_clean", sa.String(500), nullable=False, server_default=""),
-        sa.Column("estimated_budget", sa.String(120), nullable=False, server_default="Not Disclosed"),
+        sa.Column("city_or_agency", sa.String(255), nullable=False, server_default=_sql("")),
+        sa.Column("category", sa.String(80), nullable=False, server_default=_sql("Other")),
+        sa.Column("title_raw", sa.String(500), nullable=False, server_default=_sql("")),
+        sa.Column("title_clean", sa.String(500), nullable=False, server_default=_sql("")),
+        sa.Column("estimated_budget", sa.String(120), nullable=False, server_default=_sql("Not Disclosed")),
         sa.Column("deadline_at", sa.DateTime),
-        sa.Column("deadline_text", sa.String(120), nullable=False, server_default=""),
-        sa.Column("summary_plain", sa.Text, nullable=False, server_default=""),
+        sa.Column("deadline_text", sa.String(120), nullable=False, server_default=_sql("")),
+        sa.Column("summary_plain", sa.Text, nullable=False),
         sa.Column("fit_score", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("fit_reason", sa.String(300), nullable=False, server_default=""),
-        sa.Column("contact_name", sa.String(200), nullable=False, server_default=""),
-        sa.Column("contact_email", sa.String(200), nullable=False, server_default=""),
-        sa.Column("contact_phone", sa.String(80), nullable=False, server_default=""),
-        sa.Column("bid_email_draft", sa.Text, nullable=False, server_default=""),
-        sa.Column("raw_text", sa.Text, nullable=False, server_default=""),
-        sa.Column("raw_hash", sa.String(64), nullable=False, server_default=""),
-        sa.Column("status", sa.String(20), nullable=False, server_default="active"),
-        sa.Column("ai_status", sa.String(20), nullable=False, server_default="pending"),
+        sa.Column("fit_reason", sa.String(300), nullable=False, server_default=_sql("")),
+        sa.Column("contact_name", sa.String(200), nullable=False, server_default=_sql("")),
+        sa.Column("contact_email", sa.String(200), nullable=False, server_default=_sql("")),
+        sa.Column("contact_phone", sa.String(80), nullable=False, server_default=_sql("")),
+        sa.Column("bid_email_draft", sa.Text, nullable=False),
+        sa.Column("raw_text", sa.Text, nullable=False),
+        sa.Column("raw_hash", sa.String(64), nullable=False, server_default=_sql("")),
+        sa.Column("status", sa.String(20), nullable=False, server_default=_sql("active")),
+        sa.Column("ai_status", sa.String(20), nullable=False, server_default=_sql("pending")),
         sa.Column("published_at", sa.DateTime),
         sa.Column("created_at", sa.DateTime),
         sa.Column("updated_at", sa.DateTime),
@@ -81,7 +102,7 @@ def upgrade():
         sa.Column("updated", sa.Integer, nullable=False, server_default="0"),
         sa.Column("ai_ok", sa.Integer, nullable=False, server_default="0"),
         sa.Column("ai_failed", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("error", sa.Text, nullable=False, server_default=""),
+        sa.Column("error", sa.Text, nullable=False),
     )
     op.create_table(
         "favorites",
@@ -97,14 +118,14 @@ def upgrade():
         sa.Column("user_id", sa.Integer, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("kind", sa.String(40), nullable=False),
         sa.Column("sent_on", sa.Date, nullable=False),
-        sa.Column("status", sa.String(20), nullable=False, server_default="sent"),
-        sa.Column("detail", sa.Text, nullable=False, server_default=""),
+        sa.Column("status", sa.String(20), nullable=False, server_default=_sql("sent")),
+        sa.Column("detail", sa.Text, nullable=False),
         sa.UniqueConstraint("user_id", "kind", "sent_on", name="uq_email_once"),
     )
     op.create_table(
         "settings",
         sa.Column("key", sa.String(80), primary_key=True),
-        sa.Column("value", sa.Text, nullable=False, server_default=""),
+        sa.Column("value", sa.Text, nullable=False),
     )
 
 

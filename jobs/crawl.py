@@ -26,9 +26,7 @@ def rank(notices: list[RawNotice], limit: int) -> list[RawNotice]:
         return sum(1 for word in SMB_WORDS if word in blob)
 
     ordered = sorted(notices, key=score, reverse=True)
-    preferred = [notice for notice in ordered if score(notice) > 0]
-    chosen = preferred or ordered
-    return chosen[:limit]
+    return ordered[:limit]
 
 
 def save_notice(db: Session, notice: RawNotice, run: CrawlRun) -> None:

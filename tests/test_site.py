@@ -20,9 +20,8 @@ def test_home_hides_expired_sample():
 
 def test_paywall_then_member_unlock():
     home = client.get("/").text
-    match = re.search(r'href="/opportunities/(\d+)"', home)
-    assert match
-    item_id = match.group(1)
+    cards = re.findall(r'href="/opportunities/(\d+)"(.*?)</a>', home, re.S)
+    item_id = next(card_id for card_id, body in cards if "Replace the library" in body)
     locked = client.get(f"/opportunities/{item_id}")
     assert "purchasing@" not in locked.text
     assert "Unlock for $" in locked.text
