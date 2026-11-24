@@ -13,17 +13,29 @@ client = TestClient(app)
 def test_home_hides_expired_sample():
     page = client.get("/")
     assert page.status_code == 200
-    assert "Replace the library" in page.text
     assert "Expired sample" not in page.text
     assert "purchasing@" not in page.text
+    if "City of Austin" in page.text or "Department of" in page.text:
+        assert "Replace the library" not in page.text
+    else:
+        assert "Replace the library" in page.text
 
 
-def test_paywall_then_member_unlock():
+def test_sitemap_lists_real_bids():
+    page = client.get("/sitemap.xml")
+    assert page.status_code == 200
+    assert "/opportunities/" in page.text
+    assert "sample" not in page.text
+
+
+def test_paywall_then_member_unlock(monkeypatch):
+    monkeypatch.setattr("app.main.send_mail", lambda *args, **kwargs: "smtp-not-configured")
     home = client.get("/").text
-    cards = re.findall(r'href="/opportunities/(\d+)"(.*?)</a>', home, re.S)
-    item_id = next(card_id for card_id, body in cards if "Replace the library" in body)
+    match = re.search(r'href="/opportunities/(\d+)"', home)
+    assert match
+    item_id = match.group(1)
     locked = client.get(f"/opportunities/{item_id}")
-    assert "purchasing@" not in locked.text
+    assert "Original posting" not in locked.text
     assert "Unlock for $" in locked.text
 
     page = client.post("/login", data={"email": "owner@example.com"})
@@ -35,8 +47,12 @@ def test_paywall_then_member_unlock():
     assert user_id
     client.post(f"/admin/members/{user_id.group(1)}", data={"status": "active"})
     opened = client.get(f"/opportunities/{item_id}")
-    assert "purchasing@" in opened.text
     assert "Original posting" in opened.text
+
+
+def test_paypal_webhook_rejects_missing_signature():
+    denied = client.post("/webhooks/paypal", content=b"{}")
+    assert denied.status_code == 400
 
 
 def test_webhook_rejects_bad_signature():

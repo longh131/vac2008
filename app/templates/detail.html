@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}{{ item.title_clean }}{% endblock %}
+{% block title %}{{ item.title_clean }} — {{ item.city_or_agency }} {{ item.state }} bid{% endblock %}
+{% block description %}{{ item.summary_plain[:180] }}{% endblock %}
 {% block body %}
 <article class="detail">
   <p class="meta"><span>{{ item.state }}</span> {{ item.city_or_agency }} · {{ item.category }}{% if item.source_key == 'seed' %} · Sample{% endif %}</p>

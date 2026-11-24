@@ -3,10 +3,10 @@ import secrets
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -38,7 +38,24 @@ def create_app() -> FastAPI:
 
     @app.get("/robots.txt")
     def robots():
-        return PlainTextResponse("User-agent: *\nAllow: /\n")
+        return PlainTextResponse(f"User-agent: *\nAllow: /\nSitemap: https://{settings.domain}/sitemap.xml\n")
+
+    @app.get("/sitemap.xml")
+    def sitemap():
+        db = SessionLocal()
+        try:
+            rows = db.scalars(select(Opportunity).where(
+                Opportunity.status == "active",
+                Opportunity.source_key != "seed",
+            )).all()
+            locs = [f"https://{settings.domain}/", f"https://{settings.domain}/pricing"]
+            locs.extend(f"https://{settings.domain}/opportunities/{row.id}" for row in rows)
+            body = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+            body.extend(f"<url><loc>{loc}</loc></url>" for loc in locs)
+            body.append("</urlset>")
+            return Response("\n".join(body), media_type="application/xml")
+        finally:
+            db.close()
 
     @app.get("/")
     def home(request: Request, state: str = "", category: str = "", q: str = ""):
@@ -85,7 +102,51 @@ def create_app() -> FastAPI:
     @app.get("/pricing")
     def pricing(request: Request):
         db = _db(request)
-        return _render(request, "pricing.html", {"checkout": _checkout(db, _user(request, db))})
+        from app.paypal import ready
+
+        return _render(request, "pricing.html", {"checkout": _checkout(db, _user(request, db)), "paypal": ready()})
+
+    @app.post("/billing/paypal/start")
+    def paypal_start(request: Request):
+        from app.paypal import approval_url, ready
+
+        db = _db(request)
+        if not ready():
+            _flash(request, "PayPal is not configured yet.")
+            return RedirectResponse("/pricing", status_code=303)
+        user = _user(request, db)
+        base = str(request.base_url).rstrip("/") if settings.debug else f"https://{settings.domain}"
+        try:
+            url = approval_url(
+                f"{base}/billing/paypal/return",
+                f"{base}/pricing?paypal=cancel",
+                user.email if user else "",
+            )
+        except Exception as exc:
+            _flash(request, f"PayPal could not start checkout. {exc}"[:240])
+            return RedirectResponse("/pricing", status_code=303)
+        return RedirectResponse(url, status_code=303)
+
+    @app.get("/billing/paypal/return")
+    def paypal_return(request: Request, subscription_id: str = ""):
+        from app.paypal import fetch_subscription, grant
+
+        db = _db(request)
+        if not subscription_id:
+            _flash(request, "PayPal did not confirm a subscription.")
+            return RedirectResponse("/pricing", status_code=303)
+        try:
+            resource = fetch_subscription(subscription_id)
+            grant(db, resource)
+        except Exception as exc:
+            _flash(request, f"PayPal has not confirmed the payment yet. {exc}"[:240])
+            return RedirectResponse("/account" if request.session.get("user_id") else "/login", status_code=303)
+        status = str(resource.get("status") or "").upper()
+        if status == "ACTIVE":
+            _flash(request, "Payment received. Sign in with the same email you used on PayPal.")
+        else:
+            _flash(request, "PayPal is confirming the payment. Sign in with the same email in a minute.")
+        return RedirectResponse("/account" if request.session.get("user_id") else "/login", status_code=303)
 
     @app.get("/login")
     def login_form(request: Request):
@@ -175,6 +236,21 @@ def create_app() -> FastAPI:
             user.digest_opt_out = True
             db.commit()
             return PlainTextResponse("You will no longer get the daily job email.")
+        finally:
+            db.close()
+
+    @app.post("/webhooks/paypal")
+    async def paypal_webhook(request: Request):
+        from app.paypal import apply_event, verify_webhook
+
+        body = await request.body()
+        ok, event = verify_webhook(request.headers, body)
+        if not ok or event is None:
+            return JSONResponse({"ok": False, "message": "bad signature"}, status_code=400)
+        db = SessionLocal()
+        try:
+            message = apply_event(db, event)
+            return JSONResponse({"ok": True, "message": message})
         finally:
             db.close()
 
@@ -338,8 +414,13 @@ def _listing(db: Session, state: str, category: str, q: str):
     if q.strip():
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(Opportunity.title_clean.ilike(like), Opportunity.summary_plain.ilike(like), Opportunity.city_or_agency.ilike(like)))
-    seed_last = case((Opportunity.source_key == "seed", 1), else_=0)
-    return db.scalars(stmt.order_by(seed_last.asc(), Opportunity.published_at.desc()).limit(20)).all()
+    real = db.scalar(select(func.count()).select_from(Opportunity).where(
+        Opportunity.status == "active",
+        Opportunity.source_key != "seed",
+    ))
+    if real:
+        stmt = stmt.where(Opportunity.source_key != "seed")
+    return db.scalars(stmt.order_by(Opportunity.published_at.desc()).limit(20)).all()
 
 
 def _render(request: Request, name: str, extra: dict):
@@ -351,6 +432,7 @@ def _render(request: Request, name: str, extra: dict):
         "member": _member(db, user) if "member" not in extra else extra["member"],
         "flashes": request.session.pop("flashes", []),
         "price": _setting(db, "display_price", "29"),
+        "domain": settings.domain,
     }
     context.update(extra)
     return templates.TemplateResponse(request, name, context)

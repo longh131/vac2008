@@ -8,16 +8,26 @@ from sqlalchemy.orm import Session
 from app.ai import enrich
 from app.models import CrawlRun, Opportunity
 from app.services import text_hash
+from sources.austin import attach_contact
 from sources.austin import fetch as fetch_austin
 from sources.florida import fetch as fetch_florida
 from sources.types import RawNotice
 
 UA = "VendorAccessClub/1.0 (+https://vac2008.com; public procurement summary)"
+TOO_BIG = (
+    "statewide", "prequalification", "design-build", "design build",
+    "staff augmentation", "lobbyist", "aircraft", "million",
+)
 SMB_WORDS = (
     "hvac", "plumb", "janitor", "custod", "landscape", "mowing", "lawn",
     "clean", "roof", "electrical", "repair", "maintenance", "pest",
     "supply", "supplies", "delivery", "paint", "floor",
 )
+
+
+def too_big(notice: RawNotice) -> bool:
+    blob = f"{notice.title} {notice.description}".lower()
+    return any(word in blob for word in TOO_BIG)
 
 
 def rank(notices: list[RawNotice], limit: int) -> list[RawNotice]:
@@ -36,12 +46,26 @@ def save_notice(db: Session, notice: RawNotice, run: CrawlRun) -> None:
         Opportunity.source_key == notice.source_key,
         Opportunity.external_id == notice.external_id,
     ))
-    if existing and existing.raw_hash == digest and existing.ai_status in {"ok", "fallback"}:
+    if too_big(notice):
+        if existing and existing.status == "active":
+            existing.status = "hidden"
+            existing.updated_at = datetime.utcnow()
+            run.updated += 1
+        return
+    if existing and existing.raw_hash == digest and existing.ai_status == "ok":
         existing.deadline_at = notice.deadline_at
         existing.deadline_text = notice.deadline_text
+        if notice.contact_name:
+            existing.contact_name = notice.contact_name[:200]
+        if notice.contact_email:
+            existing.contact_email = notice.contact_email[:200]
+        if notice.contact_phone:
+            existing.contact_phone = notice.contact_phone[:80]
         existing.updated_at = datetime.utcnow()
         if notice.deadline_at and notice.deadline_at < datetime.utcnow() and existing.status == "active":
             existing.status = "expired"
+        if existing.status == "active" and existing.fit_score < 60:
+            existing.status = "hidden"
         run.updated += 1
         return
     card = enrich(notice)
@@ -54,6 +78,8 @@ def save_notice(db: Session, notice: RawNotice, run: CrawlRun) -> None:
     status = "active"
     if notice.deadline_at and notice.deadline_at.date() < datetime.utcnow().date():
         status = "expired"
+    elif too_big(notice) or card["fit_score"] < 60:
+        status = "hidden"
     values = dict(
         source_url=notice.source_url,
         state=notice.state,
@@ -103,9 +129,15 @@ def run_crawl(db: Session) -> CrawlRun:
                 notices, error = fetcher(client)
                 if error:
                     errors.append(error)
-                picked = rank(notices, 8)
+                for notice in notices:
+                    if too_big(notice):
+                        save_notice(db, notice, run)
+                db.commit()
+                picked = rank([notice for notice in notices if not too_big(notice)], 12)
                 run.found += len(picked)
                 for notice in picked:
+                    if notice.source_key == "austin_tx":
+                        attach_contact(client, notice)
                     save_notice(db, notice, run)
                     db.commit()
                     time.sleep(1.2)

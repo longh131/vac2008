@@ -35,9 +35,15 @@ def send_mail(to: str, subject: str, body: str) -> str:
     message["To"] = to
     message["Subject"] = subject
     message.set_content(body)
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
+    if int(settings.smtp_port) == 465:
+        smtp = smtplib.SMTP_SSL(settings.smtp_host, int(settings.smtp_port), timeout=20)
+    else:
+        smtp = smtplib.SMTP(settings.smtp_host, int(settings.smtp_port), timeout=20)
         smtp.starttls()
+    try:
         if settings.configured(settings.smtp_user):
             smtp.login(settings.smtp_user, settings.smtp_password)
         smtp.send_message(message)
+    finally:
+        smtp.quit()
     return "sent"

@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     lemonsqueezy_variant_id: str = ""
     lemonsqueezy_webhook_secret: str = ""
     lemonsqueezy_checkout_url: str = ""
+    paypal_client_id: str = ""
+    paypal_client_secret: str = ""
+    paypal_webhook_id: str = ""
+    paypal_plan_id: str = ""
+    paypal_mode: str = "live"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

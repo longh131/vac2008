@@ -106,6 +106,35 @@ def parse_listing(html: str) -> list[RawNotice]:
     return notices
 
 
+def attach_contact(client: httpx.Client, notice: RawNotice) -> None:
+    if notice.contact_email or "solicitation_details.cfm" not in notice.source_url:
+        return
+    try:
+        response = client.get(notice.source_url, timeout=25)
+    except Exception:
+        return
+    if response.status_code != 200:
+        return
+    block = re.search(r"(?is)Solicitation Specific.*?<td>(.*?)</td>", response.text)
+    if not block:
+        return
+    lines = []
+    for part in re.split(r"(?i)<br\s*/?>", block.group(1)):
+        line = re.sub(r"<[^>]+>", " ", html_lib.unescape(part))
+        line = re.sub(r"\s+", " ", line).strip()
+        if line:
+            lines.append(line)
+    if lines:
+        notice.contact_name = lines[0][:200]
+    for line in lines:
+        email = re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", line)
+        phone = re.search(r"\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}", line)
+        if email:
+            notice.contact_email = email.group(0)
+        elif phone:
+            notice.contact_phone = phone.group(0)
+
+
 def fetch(client: httpx.Client, limit: int = 24) -> tuple[list[RawNotice], str]:
     if robots_block(client, LIST_URL):
         return [], "Austin solicitations page disallows crawlers in robots.txt."

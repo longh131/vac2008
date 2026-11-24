@@ -17,10 +17,10 @@ def fallback_card(notice) -> dict:
         budget = f"{money.group(0)} (Est.)"
     score = 68
     lowered = blob.lower()
-    if any(word in lowered for word in ("statewide", "prequalification", "design-build", "million")):
-        score = 42
     if any(word in lowered for word in ("local", "maintenance", "repair", "janitorial", "mowing")):
         score = 78
+    if any(word in lowered for word in ("statewide", "prequalification", "design-build", "million")):
+        score = 42
     deadline = notice.deadline_text or "Deadline not stated"
     summary = (
         f"{notice.agency or 'The agency'} is asking for: {notice.title}. "

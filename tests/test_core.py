@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from app.services import guess_category, is_member, preview_draft
-from sources.austin import parse_listing
+from sources.austin import attach_contact, parse_listing
 from sources.florida import find_records, normalize
 from sources.types import RawNotice
 
@@ -73,6 +73,42 @@ def test_austin_html():
     assert rows[0].deadline_at == datetime(2026, 12, 3, 14, 0)
     assert "duct bank" in rows[0].description
     assert "sid=142008" in rows[0].source_url
+
+
+def test_paypal_status_map():
+    from app.paypal import membership_status
+
+    assert membership_status("ACTIVE") == "active"
+    assert membership_status("CANCELLED") == "canceled"
+    assert membership_status("APPROVED") == "expired"
+
+
+def test_austin_contact_block():
+    from sources.types import RawNotice
+
+    class Fake:
+        status_code = 200
+        text = """
+        <th>Solicitation Specific<br> Questions:</th>
+        <td>Jacqueline Nunez<br>(512) 978-1345<br>jackie.nunez@austintexas.gov</td>
+        <td>Lisa Barney<br>smbrcompliancedocuments@austintexas.gov</td>
+        """
+
+        def get(self, url, timeout=25):
+            return self
+
+    notice = RawNotice("austin_tx", "IFB 1", "https://example.com/solicitation_details.cfm?sid=1", "TX", "City of Austin", "Gas monitors", "Lease detectors.", None, "Dec 1")
+    attach_contact(Fake(), notice)
+    assert notice.contact_name == "Jacqueline Nunez"
+    assert notice.contact_email == "jackie.nunez@austintexas.gov"
+    assert "978" in notice.contact_phone
+
+
+def test_big_jobs_score_lower_than_repairs():
+    from app.ai import fallback_card
+    big = RawNotice("x", "1", "https://example.com", "FL", "State", "Statewide roof repair", "A statewide contract.", None, "Dec 1")
+    small = RawNotice("x", "2", "https://example.com", "TX", "City", "Roof repair", "Local repair.", None, "Dec 1")
+    assert fallback_card(big)["fit_score"] < fallback_card(small)["fit_score"]
 
 
 def test_fallback_does_not_invent_budget():
