@@ -54,3 +54,18 @@ def grounded(value: str, blob: str) -> str:
 
 def text_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def retire_expired(db) -> int:
+    from sqlalchemy import update
+
+    from app.models import Opportunity
+
+    now = datetime.utcnow()
+    result = db.execute(update(Opportunity).where(
+        Opportunity.status.in_(("active", "hidden", "expired")),
+        Opportunity.deadline_at.is_not(None),
+        Opportunity.deadline_at < now,
+    ).values(status="deleted", updated_at=now))
+    db.commit()
+    return result.rowcount or 0

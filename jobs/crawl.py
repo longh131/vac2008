@@ -143,6 +143,9 @@ def run_crawl(db: Session) -> CrawlRun:
                     time.sleep(1.2)
     except Exception as exc:
         errors.append(str(exc))
+    from app.services import retire_expired
+
+    retire_expired(db)
     run.error = "\n".join(errors)[:4000]
     run.finished_at = datetime.utcnow()
     db.commit()

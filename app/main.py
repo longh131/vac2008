@@ -1,9 +1,10 @@
 import hashlib
 import secrets
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
@@ -13,7 +14,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.mailer import read_unsub_token, send_mail
 from app.models import CrawlRun, EmailLog, Favorite, LoginToken, Opportunity, Setting, Subscription, User
-from app.services import CATEGORIES, is_member, preview_draft
+from app.services import CATEGORIES, is_member, preview_draft, retire_expired
 
 settings = get_settings()
 templates = Jinja2Templates(directory="app/templates")
@@ -57,23 +58,35 @@ def create_app() -> FastAPI:
         finally:
             db.close()
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return FileResponse("app/static/favicon.ico")
+
     @app.get("/")
-    def home(request: Request, state: str = "", category: str = "", q: str = ""):
+    def home(request: Request, state: str = "", category: str = "", q: str = "", page: int = 1):
         db = _db(request)
-        rows = _listing(db, state, category, q)
+        rows, page, pages = _listing(db, state, category, q, page)
+        filters = urlencode({key: value for key, value in {
+            "state": state if state in {"TX", "FL"} else "",
+            "category": category if category in CATEGORIES else "",
+            "q": q.strip(),
+        }.items() if value})
         return _render(request, "home.html", {
             "rows": rows,
             "state": state,
             "category": category,
             "q": q,
             "categories": CATEGORIES,
+            "page": page,
+            "pages": pages,
+            "filters": filters,
         })
 
     @app.get("/opportunities/{item_id}")
     def detail(request: Request, item_id: int):
         db = _db(request)
         item = db.get(Opportunity, item_id)
-        if not item:
+        if not item or item.status == "deleted":
             raise HTTPException(404)
         user = _user(request, db)
         member = _member(db, user)
@@ -267,24 +280,32 @@ def create_app() -> FastAPI:
             db.close()
 
     @app.get("/admin")
-    def admin(request: Request):
+    def admin(request: Request, tab: str = "desk"):
         if not request.session.get("admin"):
             return _render(request, "admin_login.html", {})
+        if tab not in {"desk", "notices", "members", "billing", "trash"}:
+            tab = "desk"
         db = _db(request)
+        retire_expired(db)
         stats = {
-            "opportunities": db.scalar(select(func.count()).select_from(Opportunity)) or 0,
+            "opportunities": db.scalar(select(func.count()).select_from(Opportunity).where(Opportunity.status == "active")) or 0,
             "today": db.scalar(select(func.count()).select_from(Opportunity).where(Opportunity.published_at >= datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0))) or 0,
             "ai_ok": db.scalar(select(func.count()).select_from(Opportunity).where(Opportunity.ai_status == "ok")) or 0,
             "members": db.scalar(select(func.count()).select_from(Subscription).where(Subscription.status == "active")) or 0,
             "mails": db.scalar(select(func.count()).select_from(EmailLog).where(EmailLog.status == "sent")) or 0,
         }
         runs = db.scalars(select(CrawlRun).order_by(CrawlRun.id.desc()).limit(8)).all()
-        rows = db.scalars(select(Opportunity).order_by(Opportunity.id.desc()).limit(30)).all()
-        users = db.scalars(select(User).order_by(User.id.desc()).limit(20)).all()
+        rows = db.scalars(select(Opportunity).where(Opportunity.status != "deleted").order_by(Opportunity.id.desc()).limit(40)).all()
+        trash = db.scalars(select(Opportunity).where(Opportunity.status == "deleted").order_by(Opportunity.updated_at.desc()).limit(40)).all()
+        users = db.scalars(select(User).order_by(User.id.desc()).limit(40)).all()
         subs = {row.user_id: row.status for row in db.scalars(select(Subscription)).all()}
         price = _setting(db, "display_price", "29")
         checkout = _setting(db, "checkout_url", settings.lemonsqueezy_checkout_url)
-        return _render(request, "admin.html", {"stats": stats, "runs": runs, "rows": rows, "users": users, "subs": subs, "price": price, "checkout": checkout, "warn_password": settings.admin_password == "replace-me"})
+        return _render(request, "admin.html", {
+            "tab": tab, "stats": stats, "runs": runs, "rows": rows, "trash": trash,
+            "users": users, "subs": subs, "price": price, "checkout": checkout,
+            "warn_password": settings.admin_password == "replace-me",
+        })
 
     @app.post("/admin/login")
     def admin_login(request: Request, password: str = Form(...)):
@@ -319,13 +340,51 @@ def create_app() -> FastAPI:
             return RedirectResponse("/admin", status_code=303)
         db = _db(request)
         item = db.get(Opportunity, item_id)
-        if item and status in {"active", "hidden", "expired"}:
+        if item and status in {"active", "hidden"} and item.status != "deleted":
             item.status = status
             item.title_clean = title_clean[:500]
             item.fit_score = max(1, min(100, fit_score))
             item.updated_at = datetime.utcnow()
             db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=notices", status_code=303)
+
+    @app.post("/admin/opportunities/{item_id}/delete")
+    def admin_delete(request: Request, item_id: int):
+        if not request.session.get("admin"):
+            return RedirectResponse("/admin", status_code=303)
+        db = _db(request)
+        item = db.get(Opportunity, item_id)
+        if item and item.status != "deleted":
+            item.status = "deleted"
+            item.updated_at = datetime.utcnow()
+            db.commit()
+        return RedirectResponse("/admin?tab=notices", status_code=303)
+
+    @app.post("/admin/trash/{item_id}/restore")
+    def admin_restore(request: Request, item_id: int):
+        if not request.session.get("admin"):
+            return RedirectResponse("/admin", status_code=303)
+        db = _db(request)
+        item = db.get(Opportunity, item_id)
+        if item and item.status == "deleted":
+            still_open = item.deadline_at is None or item.deadline_at >= datetime.utcnow()
+            item.status = "active" if still_open else "hidden"
+            item.updated_at = datetime.utcnow()
+            db.commit()
+        return RedirectResponse("/admin?tab=trash", status_code=303)
+
+    @app.post("/admin/trash/{item_id}/purge")
+    def admin_purge(request: Request, item_id: int):
+        if not request.session.get("admin"):
+            return RedirectResponse("/admin", status_code=303)
+        db = _db(request)
+        item = db.get(Opportunity, item_id)
+        if item and item.status == "deleted":
+            for saved in db.scalars(select(Favorite).where(Favorite.opportunity_id == item.id)).all():
+                db.delete(saved)
+            db.delete(item)
+            db.commit()
+        return RedirectResponse("/admin?tab=trash", status_code=303)
 
     @app.post("/admin/settings")
     def admin_settings(request: Request, display_price: str = Form(...), checkout_url: str = Form("")):
@@ -335,7 +394,7 @@ def create_app() -> FastAPI:
         _put_setting(db, "display_price", display_price.strip() or "29")
         _put_setting(db, "checkout_url", checkout_url.strip())
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=billing", status_code=303)
 
     @app.post("/admin/members/{user_id}")
     def admin_member(request: Request, user_id: int, status: str = Form(...)):
@@ -353,7 +412,7 @@ def create_app() -> FastAPI:
         if status == "active":
             sub.current_period_end = datetime.utcnow() + timedelta(days=30)
         db.commit()
-        return RedirectResponse("/admin", status_code=303)
+        return RedirectResponse("/admin?tab=members", status_code=303)
 
     return app
 
@@ -403,7 +462,8 @@ def _checkout(db: Session, user: User | None) -> str:
     return url
 
 
-def _listing(db: Session, state: str, category: str, q: str):
+def _listing(db: Session, state: str, category: str, q: str, page: int = 1):
+    retire_expired(db)
     stmt = select(Opportunity).where(Opportunity.status == "active").where(
         or_(Opportunity.deadline_at.is_(None), Opportunity.deadline_at >= datetime.utcnow())
     )
@@ -420,7 +480,11 @@ def _listing(db: Session, state: str, category: str, q: str):
     ))
     if real:
         stmt = stmt.where(Opportunity.source_key != "seed")
-    return db.scalars(stmt.order_by(Opportunity.published_at.desc()).limit(20)).all()
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    pages = max(1, (total + 19) // 20)
+    page = min(max(page, 1), pages)
+    rows = db.scalars(stmt.order_by(Opportunity.published_at.desc()).offset((page - 1) * 20).limit(20)).all()
+    return rows, page, pages
 
 
 def _render(request: Request, name: str, extra: dict):

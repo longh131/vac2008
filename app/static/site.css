@@ -22,7 +22,13 @@ a { color: var(--copper); }
   padding: 22px 0 8px;
   border-bottom: 1px solid var(--line);
 }
-.brand { color: var(--ink); font-weight: 700; text-decoration: none; letter-spacing: 0.01em; }
+.brand { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 700; text-decoration: none; letter-spacing: 0.01em; }
+.brand img { display: block; }
+.tabs { display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0 20px; font: 15px/1.2 "Segoe UI", sans-serif; }
+.tabs a { color: var(--ink); text-decoration: none; }
+.tabs a.on { color: var(--copper); border-bottom: 2px solid var(--copper); }
+.pager { display: flex; gap: 16px; align-items: center; font: 15px/1.2 "Segoe UI", sans-serif; }
+button.quiet { background: transparent; color: var(--copper); border: 1px solid var(--line); }
 nav a { margin-left: 16px; color: var(--ink); text-decoration: none; }
 nav a:hover { text-decoration: underline; }
 .hero { padding: 36px 0 8px; }

@@ -43,7 +43,7 @@ def test_paywall_then_member_unlock(monkeypatch):
     assert client.get(f"/auth/verify?token={token}", follow_redirects=False).status_code == 303
 
     client.post("/admin/login", data={"password": "replace-me"})
-    user_id = re.search(r"/admin/members/(\d+)", client.get("/admin").text)
+    user_id = re.search(r"/admin/members/(\d+)", client.get("/admin?tab=members").text)
     assert user_id
     client.post(f"/admin/members/{user_id.group(1)}", data={"status": "active"})
     opened = client.get(f"/opportunities/{item_id}")
