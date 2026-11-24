@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block body %}
+<section class="narrow">
+  <h1>Sign in by email</h1>
+  <p>No password. We send one link, good for 30 minutes.</p>
+  <form method="post">
+    <label>Email <input type="email" name="email" required></label>
+    <button type="submit">Email me a link</button>
+  </form>
+  {% if link %}
+  <p class="devlink"><a href="{{ link }}">Open the sign-in link</a></p>
+  {% endif %}
+</section>
+{% endblock %}

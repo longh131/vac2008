@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Small government jobs in Texas and Florida{% endblock %}
+{% block body %}
+<section class="hero">
+  <p class="eyebrow">Texas and Florida</p>
+  <h1>The short version of small government jobs.</h1>
+  <p class="lede">Bid packets run long and sit on different sites. Each morning we pull the public ones a 1–10 person shop can actually bid, and say in plain English what the work is.</p>
+  <a class="button" href="/pricing">Unlock contacts — ${{ price }}/month</a>
+</section>
+<form class="filters" method="get">
+  <label>State
+    <select name="state">
+      <option value="">Both</option>
+      <option value="TX" {% if state == 'TX' %}selected{% endif %}>Texas</option>
+      <option value="FL" {% if state == 'FL' %}selected{% endif %}>Florida</option>
+    </select>
+  </label>
+  <label>Trade
+    <select name="category">
+      <option value="">All</option>
+      {% for name in categories %}
+      <option value="{{ name }}" {% if category == name %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Search
+    <input name="q" value="{{ q }}" placeholder="roof, mowing, janitorial">
+  </label>
+  <button type="submit">Filter</button>
+</form>
+{% if not rows %}
+<p class="empty">No open jobs match that filter.</p>
+{% endif %}
+<ul class="cards">
+  {% for item in rows %}
+  <li>
+    <a href="/opportunities/{{ item.id }}">
+      <p class="meta"><span>{{ item.state }}</span> {{ item.city_or_agency }} · {{ item.category }}</p>
+      <h2>{{ item.title_clean }}</h2>
+      <p>{{ item.summary_plain }}</p>
+      <p class="facts">{{ item.estimated_budget }} · Due {{ item.deadline_text or "not stated" }} · Fit {{ item.fit_score }}/100</p>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

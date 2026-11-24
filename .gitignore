@@ -1,0 +1,8 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+vac2008.db
+logs/
+docs/数据库密码.txt

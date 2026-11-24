@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Vendor Access Club{% endblock %}</title>
+  <link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">Vendor Access Club</a>
+    <nav>
+      <a href="/">Jobs</a>
+      <a href="/pricing">Pricing</a>
+      {% if user %}<a href="/account">Account</a>{% else %}<a href="/login">Sign in</a>{% endif %}
+    </nav>
+  </header>
+  {% for note in flashes %}<p class="flash">{{ note }}</p>{% endfor %}
+  <main>{% block body %}{% endblock %}</main>
+  <footer>
+    <p>Public government notices, rewritten for a small crew. The card is a reading aid. The official posting is the bid.</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ item.title_clean }}{% endblock %}
+{% block body %}
+<article class="detail">
+  <p class="meta"><span>{{ item.state }}</span> {{ item.city_or_agency }} · {{ item.category }}{% if item.source_key == 'seed' %} · Sample{% endif %}</p>
+  <h1>{{ item.title_clean }}</h1>
+  <p class="facts">{{ item.estimated_budget }} · Due {{ item.deadline_text or "not stated" }} · Fit {{ item.fit_score }}/100</p>
+  <p class="reason">{{ item.fit_reason }}</p>
+  <p class="summary">{{ item.summary_plain }}</p>
+  {% if user %}
+  <form method="post" action="/opportunities/{{ item.id }}/favorite">
+    <button type="submit">{% if favorite %}Remove from saved{% else %}Save this job{% endif %}</button>
+  </form>
+  {% endif %}
+  <section class="lockbox">
+    <h2>Buyer contact and quote email</h2>
+    {% if member %}
+    <p>{{ item.contact_name }}<br>{{ item.contact_email }}<br>{{ item.contact_phone }}</p>
+    <p><a href="{{ item.source_url }}">Original posting</a></p>
+    <textarea id="draft" rows="12">{{ item.bid_email_draft }}</textarea>
+    <p class="row">
+      <button type="button" id="copy">Copy email</button>
+      <button type="button" id="short">Shorter</button>
+      <button type="button" id="formal">More formal</button>
+    </p>
+    {% else %}
+    <p class="preview">{{ preview }}</p>
+    <p class="masked">Email, phone, the original link, and the rest of the draft stay locked.</p>
+    <a class="button" href="/pricing">Unlock for ${{ price }}/month</a>
+    {% endif %}
+  </section>
+</article>
+{% if member %}
+<script>
+const draft = document.getElementById("draft");
+document.getElementById("copy").onclick = () => navigator.clipboard.writeText(draft.value);
+document.getElementById("short").onclick = () => {
+  const parts = draft.value.trim().split(/\n\s*\n/);
+  draft.value = parts.slice(0, 2).join("\n\n");
+};
+document.getElementById("formal").onclick = () => {
+  if (!draft.value.includes("formally")) {
+    draft.value = draft.value.replace("Hello", "Dear Procurement Officer,\n\nI am writing to formally express our interest.\n\nHello");
+  }
+};
+</script>
+{% endif %}
+{% endblock %}

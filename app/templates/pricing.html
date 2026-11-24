@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Pricing{% endblock %}
+{% block body %}
+<section class="hero">
+  <h1>${{ price }} a month.</h1>
+  <p class="lede">Cancel any time. You get the buyer's email and phone, the link to the original notice, and a first draft of the quote email.</p>
+  {% if checkout %}
+  <a class="button" href="{{ checkout }}">Continue to checkout</a>
+  {% else %}
+  <p class="empty">Checkout is not connected yet. The price is ready; the Lemon Squeezy link still needs to go in the admin settings.</p>
+  {% endif %}
+  <ul class="plain">
+    <li>Free: title, place, trade, budget, deadline, plain-English summary, fit score.</li>
+    <li>Member: contact, original link, full email draft, saved jobs, morning email.</li>
+  </ul>
+</section>
+{% endblock %}

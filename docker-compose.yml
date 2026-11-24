@@ -1,0 +1,31 @@
+name: vac2008
+
+services:
+  web:
+    build: .
+    container_name: vac2008_web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@sisuu_mysql:3306/${MYSQL_DATABASE}
+      DEBUG: "false"
+      DOMAIN: ${DOMAIN:-vac2008.com}
+    expose:
+      - "8000"
+    mem_limit: 256m
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+networks:
+  edge:
+    name: hosting_edge
+    external: true

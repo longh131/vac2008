@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Account{% endblock %}
+{% block body %}
+<section class="narrow">
+  <h1>{{ user.email }}</h1>
+  <p>{% if member %}Membership is active{% if sub and sub.current_period_end %} through {{ sub.current_period_end.strftime('%b %d, %Y') }}{% endif %}.{% else %}No active membership.{% endif %}</p>
+  <p><a href="/pricing">Pricing</a></p>
+  <form method="post" action="/account/digest">
+    <label><input type="checkbox" name="opt_out" value="1" {% if user.digest_opt_out %}checked{% endif %}> Stop the morning email</label>
+    <button type="submit">Save</button>
+  </form>
+  <h2>Saved jobs</h2>
+  {% if not favorites %}<p>None yet.</p>{% endif %}
+  <ul class="plain">
+    {% for item in favorites %}
+    <li><a href="/opportunities/{{ item.id }}">{{ item.title_clean }}</a></li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/logout"><button type="submit">Sign out</button></form>
+</section>
+{% endblock %}

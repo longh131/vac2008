@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block body %}
+<section class="admin">
+  {% if warn_password %}<p class="flash">ADMIN_PASSWORD is still the placeholder. Change it in .env before this site is public.</p>{% endif %}
+  <h1>Desk</h1>
+  <ul class="stats">
+    <li>{{ stats.opportunities }} notices</li>
+    <li>{{ stats.today }} added today</li>
+    <li>{{ stats.ai_ok }} AI summaries</li>
+    <li>{{ stats.members }} active members</li>
+    <li>{{ stats.mails }} emails sent</li>
+  </ul>
+  <form method="post" action="/admin/crawl"><button type="submit">Collect now</button></form>
+  <h2>Price shown on the site</h2>
+  <form method="post" action="/admin/settings" class="stack">
+    <label>Dollars per month <input name="display_price" value="{{ price }}"></label>
+    <label>Lemon Squeezy checkout URL <input name="checkout_url" value="{{ checkout }}"></label>
+    <button type="submit">Save</button>
+  </form>
+  <h2>Recent collects</h2>
+  <ul class="plain">
+    {% for run in runs %}
+    <li>#{{ run.id }} found {{ run.found }}, new {{ run.inserted }}, updated {{ run.updated }}{% if run.error %} — {{ run.error }}{% endif %}</li>
+    {% else %}<li>None yet.</li>{% endfor %}
+  </ul>
+  <h2>Notices</h2>
+  {% for item in rows %}
+  <form method="post" action="/admin/opportunities/{{ item.id }}" class="edit">
+    <input name="title_clean" value="{{ item.title_clean }}">
+    <input name="fit_score" type="number" min="1" max="100" value="{{ item.fit_score }}">
+    <select name="status">
+      {% for name in ['active', 'hidden', 'expired'] %}
+      <option value="{{ name }}" {% if item.status == name %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Save</button>
+    <span>{{ item.state }} · {{ item.source_key }}</span>
+  </form>
+  {% endfor %}
+  <h2>Members</h2>
+  {% for person in users %}
+  <form method="post" action="/admin/members/{{ person.id }}" class="edit">
+    <span>{{ person.email }}</span>
+    <select name="status">
+      {% for name in ['active', 'canceled', 'past_due', 'expired'] %}
+      <option value="{{ name }}" {% if subs.get(person.id) == name %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Set</button>
+  </form>
+  {% else %}<li>No accounts yet.</li>{% endfor %}
+</section>
+{% endblock %}
